@@ -1,0 +1,7 @@
+{
+  "name": "HOAS LightWidget",
+  "render_readme": true,
+  "filename": "hoas-light-widget.js",
+  "homeassistant": "2026.3.0",
+  "content_in_root": false
+}

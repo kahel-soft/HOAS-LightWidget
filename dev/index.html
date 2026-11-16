@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HOAS LightWidget – Dev Harness</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #0e1015;
+        color: #f4f4f5;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 16px;
+        background: #181a20;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        flex-wrap: wrap;
+      }
+      .btn-group {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .toolbar button {
+        background: #272a34;
+        color: #f4f4f5;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 0.8rem;
+      }
+      .stage {
+        padding: 16px;
+        display: flex;
+        justify-content: center;
+      }
+      .frame {
+        width: 100%;
+        max-width: 1120px;
+      }
+      .frame.mobile {
+        max-width: 390px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <strong>HOAS LightWidget · Phase 2 Live-Glow Test-Harness</strong>
+      <div class="btn-group">
+        <button id="btn-mobile" type="button">Smartphone (390px)</button>
+        <button id="btn-desktop" type="button">Desktop (1120px)</button>
+        <button id="btn-sim-cinema" type="button">Simuliere: Filmabend</button>
+        <button id="btn-sim-warm" type="button">Simuliere: 2400K Warm</button>
+        <button id="btn-sim-off" type="button">Simuliere: Alles Aus</button>
+      </div>
+    </div>
+    <div class="stage">
+      <div id="frame" class="frame mobile">
+        <hoas-light-widget id="widget"></hoas-light-widget>
+        <pre id="service-log" style="margin-top:12px;padding:10px;background:#16181f;border:1px solid rgba(255,255,255,0.12);border-radius:8px;font-size:11px;max-height:180px;overflow:auto;white-space:pre-wrap;color:#94a3b8;">HA Service/API Log (noch keine Aufrufe)</pre>
+      </div>
+    </div>
+
+    <script type="module">
+      import "../src/hoas-light-widget.ts";
+      import { DEMO_CONFIG, createMockHass } from "./mock-hass.ts";
+
+      const widget = document.getElementById("widget");
+      const frame = document.getElementById("frame");
+      const logEl = document.getElementById("service-log");
+      const logs = [];
+
+      let hass = createMockHass((msg) => {
+        console.log("[HA Service]", msg);
+        logs.unshift(`${new Date().toLocaleTimeString()} · ${msg}`);
+        logEl.textContent = logs.slice(0, 12).join("\n");
+      });
+      widget.setConfig(DEMO_CONFIG);
+      widget.hass = hass;
+
+      const pushPatch = (patch) => {
+        const nextStates = { ...hass.states };
+        for (const [id, data] of Object.entries(patch)) {
+          if (!nextStates[id]) continue;
+          nextStates[id] = {
+            ...nextStates[id],
+            state: data.state,
+            attributes: {
+              ...nextStates[id].attributes,
+              ...data.attributes,
+            },
+          };
+        }
+        hass = { ...hass, states: nextStates };
+        widget.hass = hass;
+      };
+
+      document.getElementById("btn-mobile").addEventListener("click", () => {
+        frame.classList.add("mobile");
+      });
+      document.getElementById("btn-desktop").addEventListener("click", () => {
+        frame.classList.remove("mobile");
+      });
+      document.getElementById("btn-sim-cinema").addEventListener("click", () => {
+        pushPatch({
+          "light.wohnzimmer_floor_lamp": { state: "on", attributes: { brightness: 110, hs_color: [260, 82], rgb_color: [115, 46, 255] } },
+          "light.wohnzimmer_floor_lamp_sockel": { state: "on", attributes: { brightness: 90, hs_color: [25, 88], rgb_color: [255, 118, 30] } },
+          "light.wohnzimmer_floor_lamp_2": { state: "on", attributes: { brightness: 110, hs_color: [260, 82], rgb_color: [115, 46, 255] } },
+          "light.wohnzimmer_floor_lamp_2_sockel": { state: "on", attributes: { brightness: 90, hs_color: [25, 88], rgb_color: [255, 118, 30] } },
+          "light.wohnzimmer_bodenlampe_rechts": { state: "off", attributes: {} },
+          "light.wohnzimmer_wandlicht": { state: "on", attributes: { brightness: 140, hs_color: [195, 75], rgb_color: [64, 207, 255] } },
+          "light.wohnzimmer_led_couch": { state: "on", attributes: { brightness: 130, hs_color: [285, 78], rgb_color: [204, 56, 255] } },
+        });
+      });
+      document.getElementById("btn-sim-warm").addEventListener("click", () => {
+        pushPatch({
+          "light.wohnzimmer_floor_lamp": { state: "on", attributes: { brightness: 210, hs_color: [28, 52], rgb_color: undefined } },
+          "light.wohnzimmer_floor_lamp_sockel": { state: "on", attributes: { brightness: 180, hs_color: [28, 52], rgb_color: undefined } },
+          "light.wohnzimmer_floor_lamp_2": { state: "on", attributes: { brightness: 210, hs_color: [28, 52], rgb_color: undefined } },
+          "light.wohnzimmer_floor_lamp_2_sockel": { state: "on", attributes: { brightness: 180, hs_color: [28, 52], rgb_color: undefined } },
+          "light.wohnzimmer_bodenlampe_rechts": { state: "on", attributes: { brightness: 205, color_temp_kelvin: 2400, rgb_color: undefined } },
+          "light.wohnzimmer_wandlicht": { state: "on", attributes: { brightness: 185, hs_color: [28, 52], rgb_color: undefined } },
+          "light.wohnzimmer_led_couch": { state: "on", attributes: { brightness: 170, hs_color: [28, 52], rgb_color: undefined } },
+        });
+      });
+      document.getElementById("btn-sim-off").addEventListener("click", () => {
+        pushPatch({
+          "light.wohnzimmer_floor_lamp": { state: "off", attributes: {} },
+          "light.wohnzimmer_floor_lamp_sockel": { state: "off", attributes: {} },
+          "light.wohnzimmer_floor_lamp_2": { state: "off", attributes: {} },
+          "light.wohnzimmer_floor_lamp_2_sockel": { state: "off", attributes: {} },
+          "light.wohnzimmer_bodenlampe_rechts": { state: "off", attributes: {} },
+          "light.wohnzimmer_wandlicht": { state: "off", attributes: {} },
+          "light.wohnzimmer_led_couch": { state: "off", attributes: {} },
+        });
+      });
+    </script>
+  </body>
+</html>
