@@ -1,19 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { FurnitureObject, LightPlacement, RoomConfig } from "../types/config";
+import type { RoomConfig } from "../types/config";
 import { computeRoomBounds } from "../utils/config";
 import type { VisualLightState } from "../utils/color";
+import { buildFurniture3DGroup } from "./furniture-3d";
+import { buildLight3DObject, type LightVisualHandle } from "./lights-3d";
 
 export type CameraPreset = "pov" | "orbit";
-
-interface LightVisualHandle {
-  entityId: string;
-  coreMaterials: THREE.MeshStandardMaterial[];
-  haloMaterials: THREE.MeshBasicMaterial[];
-  haloMeshes: THREE.Object3D[];
-  selectionObjects: THREE.Object3D[];
-  pointLights: THREE.PointLight[];
-}
 
 export interface Stage3DOptions {
   onSelectLight?: (entityId: string, additive: boolean) => void;
@@ -114,8 +107,11 @@ export class PreviewStage3D {
 
     const floorGeom = new THREE.ShapeGeometry(shape);
     floorGeom.rotateX(-Math.PI / 2);
+    const floorColor = room.theme?.floor_color
+      ? Number.parseInt(room.theme.floor_color.replace(/^#/, ""), 16) || 0x1d222c
+      : 0x1d222c;
     const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x1d222c,
+      color: floorColor,
       roughness: 0.85,
       metalness: 0.05,
     });
@@ -131,12 +127,15 @@ export class PreviewStage3D {
     this.roomGroup.add(gridHelper);
 
     // Außenwände (leicht transluzent, reflektieren PointLights)
+    const wallColor = room.theme?.wall_color
+      ? Number.parseInt(room.theme.wall_color.replace(/^#/, ""), 16) || 0x334155
+      : 0x334155;
     const wallPoints: THREE.Vector3[] = [];
     const pts = room.floor_polygon;
     for (let i = 0; i < pts.length; i += 1) {
       const a = pts[i];
       const b = pts[(i + 1) % pts.length];
-      this.addWallPlane(a.x, a.y, b.x, b.y, room.height_m, 0.28);
+      this.addWallPlane(a.x, a.y, b.x, b.y, room.height_m, 0.28, wallColor);
       wallPoints.push(
         new THREE.Vector3(a.x, 0, a.y),
         new THREE.Vector3(b.x, 0, b.y),
@@ -150,7 +149,7 @@ export class PreviewStage3D {
     // Optionale Innenwände / Raumteiler
     for (const wall of room.inner_walls ?? []) {
       const h = wall.height_m ?? room.height_m;
-      this.addWallPlane(wall.from[0], wall.from[1], wall.to[0], wall.to[1], h, 0.42);
+      this.addWallPlane(wall.from[0], wall.from[1], wall.to[0], wall.to[1], h, 0.42, wallColor);
       wallPoints.push(
         new THREE.Vector3(wall.from[0], 0, wall.from[1]),
         new THREE.Vector3(wall.to[0], 0, wall.to[1]),
@@ -159,18 +158,45 @@ export class PreviewStage3D {
       );
     }
 
+    // Fenster & Türen zur Raumorientierung
+    for (const feat of room.wall_features ?? []) {
+      const dx = feat.to[0] - feat.from[0];
+      const dy = feat.to[1] - feat.from[1];
+      const len = Math.hypot(dx, dy);
+      if (len < 0.05) continue;
+      const isWindow = feat.kind === "window";
+      const h = isWindow ? 1.15 : 2.05;
+      const centerYPos = isWindow ? 1.45 : 1.025;
+      const featMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(len, h, 0.06),
+        new THREE.MeshBasicMaterial({
+          color: isWindow ? 0x38bdf8 : 0xf59e0b,
+          transparent: true,
+          opacity: 0.28,
+        }),
+      );
+      featMesh.position.set(
+        (feat.from[0] + feat.to[0]) / 2,
+        centerYPos,
+        (feat.from[1] + feat.to[1]) / 2,
+      );
+      featMesh.rotation.y = -Math.atan2(dy, dx);
+      this.roomGroup.add(featMesh);
+    }
+
     const wallLineGeom = new THREE.BufferGeometry().setFromPoints(wallPoints);
     const wallLineMat = new THREE.LineBasicMaterial({ color: 0x475569 });
     this.roomGroup.add(new THREE.LineSegments(wallLineGeom, wallLineMat));
 
-    // Referenzmöbel
+    // Referenzmöbel (inkl. L-/U-Couch & Schränke)
     for (const item of room.furniture) {
-      this.addFurniture(item);
+      this.roomGroup.add(buildFurniture3DGroup(item));
     }
 
-    // Lichtobjekte
+    // Lichtobjekte mit eigenem Design
     for (const light of room.lights) {
-      this.addLightObject(light);
+      const handle = buildLight3DObject(light, this.lightsGroup, this.hitMeshes);
+      this.lightHandles.set(light.entity_id, handle);
     }
 
     this.setCameraPreset(preset);
@@ -319,6 +345,7 @@ export class PreviewStage3D {
     y2: number,
     height: number,
     opacity: number,
+    wallColor = 0x334155,
   ): void {
     const dx = x2 - x1;
     const dy = y2 - y1;
@@ -327,7 +354,7 @@ export class PreviewStage3D {
 
     const geom = new THREE.PlaneGeometry(len, height);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
+      color: wallColor,
       roughness: 0.9,
       metalness: 0.05,
       transparent: true,
@@ -339,217 +366,6 @@ export class PreviewStage3D {
     wall.position.set((x1 + x2) / 2, height / 2, (y1 + y2) / 2);
     wall.rotation.y = -Math.atan2(dy, dx);
     this.roomGroup.add(wall);
-  }
-
-  private addFurniture(item: FurnitureObject): void {
-    const [sx, sy, sz] = item.size;
-    const [px, py, pz] = item.position;
-    const group = new THREE.Group();
-    group.position.set(px, pz, py);
-    if (item.rotation_deg) {
-      group.rotation.y = THREE.MathUtils.degToRad(item.rotation_deg);
-    }
-
-    if (item.kind === "couch") {
-      const mat = new THREE.MeshStandardMaterial({ color: 0x3b4454, roughness: 0.8 });
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(sx, sz * 0.5, sy), mat);
-      seat.position.set(0, -sz * 0.2, 0);
-      group.add(seat);
-
-      const back = new THREE.Mesh(new THREE.BoxGeometry(sx, sz * 0.55, sy * 0.24), mat);
-      back.position.set(0, sz * 0.12, sy * 0.36);
-      group.add(back);
-    } else if (item.kind === "tv" || item.kind === "screen") {
-      const screenMat = new THREE.MeshStandardMaterial({
-        color: 0x0b0f19,
-        roughness: 0.25,
-        metalness: 0.3,
-      });
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(sx, sz, sy), screenMat);
-      group.add(frame);
-    } else {
-      const mat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.75 });
-      const box = new THREE.Mesh(new THREE.BoxGeometry(sx, sz, sy), mat);
-      group.add(box);
-    }
-
-    this.roomGroup.add(group);
-  }
-
-  private addLightObject(light: LightPlacement): void {
-    const handle: LightVisualHandle = {
-      entityId: light.entity_id,
-      coreMaterials: [],
-      haloMaterials: [],
-      haloMeshes: [],
-      selectionObjects: [],
-      pointLights: [],
-    };
-
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x475569,
-      roughness: 0.3,
-      metalness: 0.1,
-    });
-    const haloMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const selectMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      wireframe: false,
-      side: THREE.DoubleSide,
-    });
-    const hitMat = new THREE.MeshBasicMaterial({ visible: false });
-
-    handle.coreMaterials.push(coreMat);
-    handle.haloMaterials.push(haloMat);
-
-    const geomDef = light.geometry;
-    if (geomDef.type === "point") {
-      const [lx, ly, lz] = geomDef.position;
-      const radius = geomDef.radius_m ?? 0.09;
-
-      const core = new THREE.Mesh(new THREE.SphereGeometry(radius, 18, 14), coreMat);
-      core.position.set(lx, lz, ly);
-      core.userData.entityId = light.entity_id;
-      this.lightsGroup.add(core);
-      this.hitMeshes.push(core);
-
-      const hit = new THREE.Mesh(new THREE.SphereGeometry(radius * 2.4, 10, 8), hitMat);
-      hit.position.copy(core.position);
-      hit.userData.entityId = light.entity_id;
-      this.lightsGroup.add(hit);
-      this.hitMeshes.push(hit);
-
-      const halo = new THREE.Mesh(new THREE.SphereGeometry(radius * 3.0, 16, 12), haloMat);
-      halo.position.copy(core.position);
-      this.lightsGroup.add(halo);
-      handle.haloMeshes.push(halo);
-
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(radius * 1.6, radius * 2.0, 24),
-        selectMat,
-      );
-      ring.position.copy(core.position);
-      ring.rotation.x = -Math.PI / 2;
-      ring.visible = false;
-      this.lightsGroup.add(ring);
-      handle.selectionObjects.push(ring);
-
-      const ptLight = new THREE.PointLight(0xffffff, 0, 5.5, 1.8);
-      ptLight.position.copy(core.position);
-      this.lightsGroup.add(ptLight);
-      handle.pointLights.push(ptLight);
-    } else if (geomDef.type === "vertical_column") {
-      const [fx, fy, fz] = geomDef.from;
-      const [tx, ty, tz] = geomDef.to;
-      const start = new THREE.Vector3(fx, fz, fy);
-      const end = new THREE.Vector3(tx, tz, ty);
-      const mid = start.clone().add(end).multiplyScalar(0.5);
-      const len = Math.max(start.distanceTo(end), 0.15);
-      const radius = geomDef.radius_m ?? 0.045;
-
-      const core = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius, radius, len, 14),
-        coreMat,
-      );
-      core.position.copy(mid);
-      core.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        end.clone().sub(start).normalize(),
-      );
-      core.userData.entityId = light.entity_id;
-      this.lightsGroup.add(core);
-      this.hitMeshes.push(core);
-
-      const hit = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius * 3.2, radius * 3.2, len + 0.1, 10),
-        hitMat,
-      );
-      hit.position.copy(mid);
-      hit.quaternion.copy(core.quaternion);
-      hit.userData.entityId = light.entity_id;
-      this.lightsGroup.add(hit);
-      this.hitMeshes.push(hit);
-
-      const halo = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius * 3.0, radius * 3.0, len + 0.06, 14),
-        haloMat,
-      );
-      halo.position.copy(mid);
-      halo.quaternion.copy(core.quaternion);
-      this.lightsGroup.add(halo);
-      handle.haloMeshes.push(halo);
-
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(radius * 2.5, 0.014, 8, 24),
-        selectMat,
-      );
-      ring.position.copy(mid);
-      ring.rotation.x = Math.PI / 2;
-      ring.visible = false;
-      this.lightsGroup.add(ring);
-      handle.selectionObjects.push(ring);
-
-      const ptLight = new THREE.PointLight(0xffffff, 0, 6.0, 1.7);
-      ptLight.position.copy(mid);
-      this.lightsGroup.add(ptLight);
-      handle.pointLights.push(ptLight);
-    } else if (geomDef.type === "polyline" && geomDef.points.length >= 2) {
-      const vecs = geomDef.points.map((p) => new THREE.Vector3(p[0], p[2], p[1]));
-      const curve = new THREE.CatmullRomCurve3(vecs, false, "catmullrom", 0.05);
-      const radius = geomDef.thickness_m ?? 0.035;
-
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 28, radius, 10, false), coreMat);
-      tube.userData.entityId = light.entity_id;
-      this.lightsGroup.add(tube);
-      this.hitMeshes.push(tube);
-
-      const hit = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 18, radius * 3.5, 8, false),
-        hitMat,
-      );
-      hit.userData.entityId = light.entity_id;
-      this.lightsGroup.add(hit);
-      this.hitMeshes.push(hit);
-
-      const halo = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 24, radius * 2.8, 10, false),
-        haloMat,
-      );
-      this.lightsGroup.add(halo);
-      handle.haloMeshes.push(halo);
-
-      const selectTube = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 24, radius * 1.9, 8, false),
-        new THREE.MeshBasicMaterial({
-          color: 0x38bdf8,
-          transparent: true,
-          opacity: 0.45,
-          depthWrite: false,
-        }),
-      );
-      selectTube.visible = false;
-      this.lightsGroup.add(selectTube);
-      handle.selectionObjects.push(selectTube);
-
-      // Bis zu 3 verteilte PointLights (Start, Ecke/Mitte, Ende) für realistischen Eck-Glow
-      const sampleCount = Math.min(3, vecs.length);
-      for (let i = 0; i < sampleCount; i += 1) {
-        const t = sampleCount === 1 ? 0.5 : i / (sampleCount - 1);
-        const pos = curve.getPointAt(t);
-        const ptLight = new THREE.PointLight(0xffffff, 0, 5.0, 1.8);
-        ptLight.position.copy(pos);
-        this.lightsGroup.add(ptLight);
-        handle.pointLights.push(ptLight);
-      }
-    }
-
-    this.lightHandles.set(light.entity_id, handle);
   }
 
   private handlePointerDown = (event: PointerEvent): void => {

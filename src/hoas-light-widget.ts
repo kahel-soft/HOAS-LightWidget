@@ -29,7 +29,7 @@ import {
   saveRoomScene,
   slugifySceneId,
 } from "./utils/ha-scenes";
-import { snapOrthogonalPoint } from "./utils/floor-editor";
+import { snapOrthogonalPoint, snapToGrid } from "./utils/floor-editor";
 import { PreviewStage3D, type CameraPreset } from "./renderers/preview-stage";
 import {
   renderFrontSvg,
@@ -44,6 +44,7 @@ import {
 } from "./components/calibration-wizard";
 import { cardStyles } from "./styles/card-styles";
 import "./editor";
+import "./panel";
 
 const STORAGE_PREFS_KEY = "hoas-light-widget:prefs:v1";
 
@@ -67,6 +68,9 @@ export class HoasLightWidget extends LitElement {
   @property({ attribute: false })
   public hass?: import("./types/config").HomeAssistant;
 
+  @property({ type: Boolean, reflect: true })
+  public fullwidth = false;
+
   @state()
   private _config?: HoasLightWidgetConfig;
 
@@ -81,10 +85,14 @@ export class HoasLightWidget extends LitElement {
     activeTab: "lights",
     editTool: "lights",
     sketchPoints: [],
+    orthogonalSketch: true,
+    selectedFurnitureId: "",
+    selectedEditLightId: "",
     areaFilterOnly: false,
     includeGroups: false,
     newLightEntityId: "",
     newLightType: "point",
+    newLightVisualKind: "bulb",
     importText: "",
   };
 
@@ -366,6 +374,10 @@ export class HoasLightWidget extends LitElement {
       enabled: true,
       tool: this._editState.editTool,
       sketchPoints: this._editState.sketchPoints,
+      selectedFurnitureId: this._editState.selectedFurnitureId,
+      onSelectFurniture: (furnitureId) => {
+        this._editState = { ...this._editState, selectedFurnitureId: furnitureId };
+      },
       onMoveLightXY: (entityId, x, y, polylineIdx) => {
         this._updateActiveRoom((room) => ({
           ...room,
@@ -470,7 +482,9 @@ export class HoasLightWidget extends LitElement {
       onCanvasTapXY: (x, y) => {
         if (this._editState.sketchPoints.length === 0) return;
         const prev = this._editState.sketchPoints[this._editState.sketchPoints.length - 1];
-        const nextPt = snapOrthogonalPoint(prev, { x, y }, 0.25);
+        const nextPt = this._editState.orthogonalSketch
+          ? snapOrthogonalPoint(prev, { x, y }, 0.25)
+          : { x: snapToGrid(Math.max(0, x), 0.25), y: snapToGrid(Math.max(0, y), 0.25) };
         if (nextPt.x === prev.x && nextPt.y === prev.y) return;
         this._editState = {
           ...this._editState,

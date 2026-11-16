@@ -3,7 +3,8 @@ import type { LightPlacement, Point2D, RoomConfig } from "../types/config";
 import { computeRoomBounds } from "../utils/config";
 import type { VisualLightState } from "../utils/color";
 import { rgbToCss } from "../utils/color";
-import { snapToGrid } from "../utils/floor-editor";
+import { getFurnitureLocalRects, snapToGrid } from "../utils/floor-editor";
+import { resolveEffectiveLightStyle } from "./lights-3d";
 
 export type EditTool = "lights" | "floor" | "furniture" | "camera";
 
@@ -11,6 +12,8 @@ export interface EditInteractionHandlers {
   enabled: boolean;
   tool: EditTool;
   sketchPoints?: Point2D[];
+  selectedFurnitureId?: string;
+  onSelectFurniture?: (furnitureId: string) => void;
   onMoveLightXY?: (entityId: string, x: number, y: number, polylineIdx?: number) => void;
   onMoveLightXZ?: (entityId: string, x: number, z: number, part?: "from" | "to" | number) => void;
   onMovePolygonVertex?: (index: number, x: number, y: number) => void;
@@ -198,6 +201,20 @@ export function renderTopDownSvg(room: RoomConfig, handlers: Plan2DHandlers) {
         `,
       )}
 
+      ${(room.wall_features ?? []).map(
+        (feat) => svg`
+          <line
+            x1=${feat.from[0]}
+            y1=${feat.from[1]}
+            x2=${feat.to[0]}
+            y2=${feat.to[1]}
+            stroke=${feat.kind === "window" ? "#38bdf8" : "#f59e0b"}
+            stroke-width="0.1"
+            stroke-linecap="round"
+          />
+        `,
+      )}
+
       <!-- Aktive Skizzen-Linie beim Neuzeichnen des Grundrisses -->
       ${isEditing && edit?.sketchPoints && edit.sketchPoints.length > 0
         ? svg`
@@ -218,38 +235,84 @@ export function renderTopDownSvg(room: RoomConfig, handlers: Plan2DHandlers) {
       <polygon points="${camX},${camY} ${coneP1} ${coneP2}" fill="rgba(56,189,248,0.09)" />
       <circle cx=${camX} cy=${camY} r="0.08" fill="#38bdf8" opacity="0.85" />
 
-      <!-- Möbel -->
+      <!-- Möbel (inkl. L-/U-Couch & Schränke) -->
       ${room.furniture.map((f) => {
         const [px, py] = f.position;
         const [sx, sy] = f.size;
-        const transform = f.rotation_deg ? `rotate(${f.rotation_deg} ${px} ${py})` : "";
+        const transform = f.rotation_deg
+          ? `translate(${px} ${py}) rotate(${f.rotation_deg})`
+          : `translate(${px} ${py})`;
         const canDragFurniture = isEditing && edit?.tool === "furniture";
+        const isSelectedFurniture = canDragFurniture && edit?.selectedFurnitureId === f.id;
+        const rects = getFurnitureLocalRects(f);
+        const fill =
+          f.kind === "tv" || f.kind === "screen"
+            ? "rgba(15,23,42,0.88)"
+            : f.kind === "wardrobe"
+              ? "rgba(71,85,105,0.42)"
+              : "rgba(100,116,139,0.28)";
+
         return svg`
           <g
             transform=${transform}
             style=${canDragFurniture ? "cursor:grab" : ""}
+            @click=${(e: MouseEvent) => {
+              if (!canDragFurniture) return;
+              e.stopPropagation();
+              edit?.onSelectFurniture?.(f.id);
+            }}
             @pointerdown=${(e: PointerEvent) => {
-              if (!canDragFurniture || !edit?.onMoveFurnitureXY) return;
+              if (!canDragFurniture) return;
+              edit?.onSelectFurniture?.(f.id);
+              if (!edit?.onMoveFurnitureXY) return;
               startSvgDrag(e, vb, (nx, ny) => {
                 edit.onMoveFurnitureXY?.(f.id, snapToGrid(nx, 0.1), snapToGrid(ny, 0.1));
               });
             }}
           >
-            <rect
-              x=${px - sx / 2}
-              y=${py - sy / 2}
-              width=${sx}
-              height=${sy}
-              rx="0.06"
-              fill=${f.kind === "tv" || f.kind === "screen" ? "rgba(15,23,42,0.85)" : "rgba(100,116,139,0.28)"}
-              stroke=${canDragFurniture ? "#f59e0b" : "rgba(148,163,184,0.45)"}
-              stroke-width=${canDragFurniture ? "0.05" : "0.035"}
-            />
+            ${rects.map(
+              (r) => svg`
+                <rect
+                  x=${r.x}
+                  y=${r.y}
+                  width=${r.width}
+                  height=${r.height}
+                  rx="0.05"
+                  fill=${fill}
+                  stroke=${isSelectedFurniture ? "#38bdf8" : canDragFurniture ? "#f59e0b" : "rgba(148,163,184,0.45)"}
+                  stroke-width=${isSelectedFurniture ? "0.065" : canDragFurniture ? "0.05" : "0.035"}
+                />
+              `,
+            )}
+            ${f.kind === "wardrobe"
+              ? svg`
+                  <line
+                    x1=${-sx / 2 + 0.08}
+                    y1=${-sy / 2 + 0.08}
+                    x2=${sx / 2 - 0.08}
+                    y2=${sy / 2 - 0.08}
+                    stroke="rgba(148,163,184,0.45)"
+                    stroke-width="0.025"
+                  />
+                `
+              : nothing}
+            ${f.label
+              ? svg`
+                  <text
+                    x="0"
+                    y="0.06"
+                    text-anchor="middle"
+                    fill="rgba(226,232,240,0.65)"
+                    font-size="0.16"
+                    pointer-events="none"
+                  >${f.label}</text>
+                `
+              : nothing}
           </g>
         `;
       })}
 
-      <!-- Lichter -->
+      <!-- Lichter (mit unterscheidbarem Lampen-/LED-Strip-Design) -->
       ${[...room.lights]
         .sort((a, b) => {
           const order = { polyline: 0, point: 1, vertical_column: 2 };
@@ -262,6 +325,7 @@ export function renderTopDownSvg(room: RoomConfig, handlers: Plan2DHandlers) {
           const color = visual ? visual.cssColor : "#52525b";
           const glowColor = visual ? rgbToCss(visual.rgb, 0.28 * visual.brightness01) : "transparent";
           const canDragLights = isEditing && edit?.tool === "lights";
+          const style = resolveEffectiveLightStyle(light);
 
           const onClick = (e: MouseEvent) => {
             e.stopPropagation();
@@ -277,13 +341,22 @@ export function renderTopDownSvg(room: RoomConfig, handlers: Plan2DHandlers) {
                   ? svg`<polyline points=${pts} fill="none" stroke=${glowColor} stroke-width="0.34" stroke-linecap="round" stroke-linejoin="round" />`
                   : nothing}
                 ${isSelected
-                  ? svg`<polyline points=${pts} fill="none" stroke="#38bdf8" stroke-width="0.22" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" />`
+                  ? svg`<polyline points=${pts} fill="none" stroke="#38bdf8" stroke-width="0.24" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" />`
                   : nothing}
                 <polyline
                   points=${pts}
                   fill="none"
+                  stroke="#1e293b"
+                  stroke-width="0.13"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <polyline
+                  points=${pts}
+                  fill="none"
                   stroke=${color}
-                  stroke-width="0.1"
+                  stroke-width="0.08"
+                  stroke-dasharray="0.08 0.06"
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 />
@@ -321,11 +394,14 @@ export function renderTopDownSvg(room: RoomConfig, handlers: Plan2DHandlers) {
           const [lx, ly] = getLightAnchorXY(light);
           const coLocated = hasCoLocatedLight(room.lights, light);
           const isOuterRing = coLocated && light.geometry.type === "point";
-          const radius = isOuterRing ? 0.2 : light.geometry.type === "vertical_column" ? 0.11 : 0.14;
+          const radius = (isOuterRing ? 0.2 : light.geometry.type === "vertical_column" ? 0.11 : 0.14) *
+            (style.scale ?? 1);
+          const rot = style.rotation_deg ?? 0;
 
           return svg`
             <g
               class="svg-light"
+              transform=${`translate(${lx} ${ly}) rotate(${rot})`}
               style=${canDragLights ? "cursor:grab" : ""}
               @click=${onClick}
               @pointerdown=${(e: PointerEvent) => {
@@ -339,14 +415,48 @@ export function renderTopDownSvg(room: RoomConfig, handlers: Plan2DHandlers) {
                 });
               }}
             >
-              ${isOn ? svg`<circle cx=${lx} cy=${ly} r=${radius + 0.22} fill=${glowColor} />` : nothing}
+              ${isOn ? svg`<circle cx="0" cy="0" r=${radius + 0.22} fill=${glowColor} />` : nothing}
               ${isSelected
-                ? svg`<circle cx=${lx} cy=${ly} r=${radius + 0.08} fill="none" stroke="#38bdf8" stroke-width="0.05" />`
+                ? svg`<circle cx="0" cy="0" r=${radius + 0.08} fill="none" stroke="#38bdf8" stroke-width="0.05" />`
                 : nothing}
-              ${isOuterRing
-                ? svg`<circle cx=${lx} cy=${ly} r=${radius} fill="none" stroke=${color} stroke-width="0.075" />`
-                : svg`<circle cx=${lx} cy=${ly} r=${radius} fill=${color} stroke="#fff" stroke-width="0.03" />`}
-              <circle cx=${lx} cy=${ly} r="0.28" fill="transparent" />
+
+              ${style.kind === "spot"
+                ? svg`
+                    <polygon
+                      points=${`0,0 ${-radius * 1.4},${-radius * 2.1} ${radius * 1.4},${-radius * 2.1}`}
+                      fill=${isOn ? glowColor : "rgba(148,163,184,0.2)"}
+                    />
+                    <circle cx="0" cy="0" r=${radius * 0.85} fill=${color} stroke="#fff" stroke-width="0.03" />
+                  `
+                : style.kind === "led_strip"
+                  ? svg`
+                      <rect
+                        x=${-radius * 2.2}
+                        y=${-radius * 0.45}
+                        width=${radius * 4.4}
+                        height=${radius * 0.9}
+                        rx="0.03"
+                        fill=${color}
+                        stroke="#fff"
+                        stroke-width="0.025"
+                      />
+                    `
+                  : style.kind === "ceiling"
+                    ? svg`
+                        <circle
+                          cx="0"
+                          cy="0"
+                          r=${radius * 1.3}
+                          fill=${color}
+                          stroke="#fff"
+                          stroke-width="0.03"
+                          stroke-dasharray="0.06 0.04"
+                        />
+                      `
+                    : isOuterRing
+                      ? svg`<circle cx="0" cy="0" r=${radius} fill="none" stroke=${color} stroke-width="0.075" />`
+                      : svg`<circle cx="0" cy="0" r=${radius} fill=${color} stroke="#fff" stroke-width="0.03" />`}
+              <circle cx="0" cy="0" r="0.28" fill="transparent" />
             </g>
           `;
         })}

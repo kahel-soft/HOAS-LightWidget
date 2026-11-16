@@ -5,6 +5,7 @@ import type {
   HoasLightWidgetConfig,
   HomeAssistant,
   LightPlacement,
+  LightVisualKind,
   Point2D,
   RoomConfig,
 } from "../types/config";
@@ -17,6 +18,7 @@ import {
   removePolygonVertex,
 } from "../utils/floor-editor";
 import { normalizeConfig } from "../utils/config";
+import { resolveEffectiveLightStyle } from "../renderers/lights-3d";
 
 export type EditTab = "rooms" | "floor" | "furniture" | "lights" | "backup";
 
@@ -24,10 +26,14 @@ export interface EditPanelState {
   activeTab: EditTab;
   editTool: EditTool;
   sketchPoints: Point2D[];
+  orthogonalSketch: boolean;
+  selectedFurnitureId: string;
+  selectedEditLightId: string;
   areaFilterOnly: boolean;
   includeGroups: boolean;
   newLightEntityId: string;
   newLightType: "point" | "vertical_column" | "polyline";
+  newLightVisualKind: LightVisualKind;
   importText: string;
 }
 
@@ -38,6 +44,29 @@ export interface EditPanelCallbacks {
   onSetState: (patch: Partial<EditPanelState>) => void;
   onNotify: (kind: "ok" | "warn" | "error", text: string) => void;
 }
+
+const LIGHT_DESIGN_OPTIONS: Array<[LightVisualKind, string]> = [
+  ["bulb", "Lampe / Birne"],
+  ["floor_lamp", "Stehlampe (Schirm)"],
+  ["floor_strip", "Stehlampe (LED-Säule)"],
+  ["led_strip", "LED-Strip (Band)"],
+  ["spot", "Spot / Strahler (Kegel)"],
+  ["table_lamp", "Tisch- / Bodenlampe"],
+  ["ceiling", "Deckenleuchte / Panel"],
+];
+
+const FURNITURE_KIND_OPTIONS: Array<[FurnitureKind, string]> = [
+  ["couch", "Couch (Gerade)"],
+  ["couch_l", "Couch (L-Form)"],
+  ["couch_u", "Couch (U-Form)"],
+  ["wardrobe", "Schrank / Regal"],
+  ["sideboard", "Sideboard / Lowboard"],
+  ["tv", "TV / Leinwand"],
+  ["table", "Tisch / Couchtisch"],
+  ["desk", "Schreibtisch"],
+  ["bed", "Bett"],
+  ["custom_box", "Freier Block"],
+];
 
 export function renderEditPanel(
   config: HoasLightWidgetConfig,
@@ -52,9 +81,9 @@ export function renderEditPanel(
         ${(
           [
             ["rooms", "Räume", "lights"],
-            ["floor", "Grundriss", "floor"],
-            ["furniture", "Möbel & POV", "furniture"],
-            ["lights", "Lichter (X/Y/Z)", "lights"],
+            ["floor", "Raum & Grundriss", "floor"],
+            ["furniture", "Möbel & Couch", "furniture"],
+            ["lights", "Lichter & Design", "lights"],
             ["backup", "Export / Import", "lights"],
           ] as Array<[EditTab, string, EditTool]>
         ).map(
@@ -195,8 +224,8 @@ function renderFloorTab(
   return html`
     <div class="edit-stack">
       <div class="modes-badge">
-        Ziehe die orangen Eckpunkte direkt in der 2D-Draufsicht (0,25m-Raster) oder nutze eine
-        Vorlage / freies Skizzieren:
+        Ziehe die orangen Eckpunkte in der 2D-Draufsicht (0,25m-Raster) oder nutze Vorlagen,
+        Skizzen-Modus, Innenwände &amp; Fenster/Türen:
       </div>
 
       <div class="edit-actions-row">
@@ -205,7 +234,7 @@ function renderFloorTab(
           class="action-btn"
           @click=${() => cb.onUpdateRoom((r) => ({ ...r, floor_polygon: createRectPolygon(5.2, 4.6) }))}
         >
-          Rechteck (5,2×4,6m)
+          Rechteck
         </button>
         <button
           type="button"
@@ -241,7 +270,7 @@ function renderFloorTab(
                   });
                   cb.onNotify(
                     "ok",
-                    "Skizzier-Modus aktiv: Tippe Ecken nacheinander in die 2D-Draufsicht (orthogonal eingerastet).",
+                    "Skizzier-Modus aktiv: Tippe Ecken nacheinander in die 2D-Draufsicht.",
                   );
                 }}
               >
@@ -260,6 +289,15 @@ function renderFloorTab(
                 Abbrechen
               </button>
             `}
+        <label class="inline-check">
+          <input
+            type="checkbox"
+            .checked=${panelState.orthogonalSketch}
+            @change=${(e: Event) =>
+              cb.onSetState({ orthogonalSketch: (e.target as HTMLInputElement).checked })}
+          />
+          90°-Snap
+        </label>
         <button
           type="button"
           class="action-btn"
@@ -271,22 +309,78 @@ function renderFloorTab(
         >
           + Innenwand
         </button>
+        <button
+          type="button"
+          class="action-btn"
+          @click=${() =>
+            cb.onUpdateRoom((r) => ({
+              ...r,
+              wall_features: [
+                ...(r.wall_features ?? []),
+                { id: `win_${Date.now().toString(36)}`, kind: "window", from: [0, 1.2], to: [0, 2.8] },
+              ],
+            }))}
+        >
+          + Fenster
+        </button>
+        <button
+          type="button"
+          class="action-btn"
+          @click=${() =>
+            cb.onUpdateRoom((r) => ({
+              ...r,
+              wall_features: [
+                ...(r.wall_features ?? []),
+                { id: `door_${Date.now().toString(36)}`, kind: "door", from: [4.2, 0], to: [5.1, 0] },
+              ],
+            }))}
+        >
+          + Tür
+        </button>
       </div>
 
-      ${(room.inner_walls ?? []).length > 0
+      <div class="edit-grid">
+        <label>
+          Bodenfarbe
+          <input
+            type="color"
+            .value=${room.theme?.floor_color ?? "#1d222c"}
+            @input=${(e: Event) => {
+              const floor_color = (e.target as HTMLInputElement).value;
+              cb.onUpdateRoom((r) => ({ ...r, theme: { ...r.theme, floor_color } }));
+            }}
+          />
+        </label>
+        <label>
+          Wandfarbe
+          <input
+            type="color"
+            .value=${room.theme?.wall_color ?? "#334155"}
+            @input=${(e: Event) => {
+              const wall_color = (e.target as HTMLInputElement).value;
+              cb.onUpdateRoom((r) => ({ ...r, theme: { ...r.theme, wall_color } }));
+            }}
+          />
+        </label>
+      </div>
+
+      ${(room.wall_features ?? []).length > 0
         ? html`
             <div class="edit-list">
-              ${(room.inner_walls ?? []).map(
-                (w, idx) => html`
+              ${(room.wall_features ?? []).map(
+                (wf) => html`
                   <div class="edit-list-row">
-                    <span>Wand ${idx + 1}: [${w.from[0]},${w.from[1]}] → [${w.to[0]},${w.to[1]}]</span>
+                    <span>
+                      ${wf.kind === "window" ? "Fenster" : "Tür"}: [${wf.from[0]},${wf.from[1]}] → [
+                      ${wf.to[0]},${wf.to[1]}]
+                    </span>
                     <button
                       type="button"
                       class="mini-tab"
                       @click=${() =>
                         cb.onUpdateRoom((r) => ({
                           ...r,
-                          inner_walls: (r.inner_walls ?? []).filter((_, i) => i !== idx),
+                          wall_features: (r.wall_features ?? []).filter((f) => f.id !== wf.id),
                         }))}
                     >
                       Entfernen
@@ -303,18 +397,37 @@ function renderFloorTab(
           (pt, idx) => html`
             <div class="edit-list-row">
               <span>Ecke ${idx + 1}: (${pt.x.toFixed(2)}m, ${pt.y.toFixed(2)}m)</span>
-              <button
-                type="button"
-                class="mini-tab"
-                ?disabled=${room.floor_polygon.length <= 3}
-                @click=${() =>
-                  cb.onUpdateRoom((r) => ({
-                    ...r,
-                    floor_polygon: removePolygonVertex(r.floor_polygon, idx),
-                  }))}
-              >
-                ×
-              </button>
+              <div class="subview-tabs">
+                <button
+                  type="button"
+                  class="mini-tab"
+                  @click=${() =>
+                    cb.onUpdateRoom((r) => {
+                      const nextPt = r.floor_polygon[(idx + 1) % r.floor_polygon.length];
+                      const mid = {
+                        x: Math.round(((pt.x + nextPt.x) / 2) * 4) / 4,
+                        y: Math.round(((pt.y + nextPt.y) / 2) * 4) / 4,
+                      };
+                      const next = [...r.floor_polygon];
+                      next.splice(idx + 1, 0, mid);
+                      return { ...r, floor_polygon: next };
+                    })}
+                >
+                  + Ecke danach
+                </button>
+                <button
+                  type="button"
+                  class="mini-tab"
+                  ?disabled=${room.floor_polygon.length <= 3}
+                  @click=${() =>
+                    cb.onUpdateRoom((r) => ({
+                      ...r,
+                      floor_polygon: removePolygonVertex(r.floor_polygon, idx),
+                    }))}
+                >
+                  ×
+                </button>
+              </div>
             </div>
           `,
         )}
@@ -328,16 +441,35 @@ function renderFurnitureTab(
   panelState: EditPanelState,
   cb: EditPanelCallbacks,
 ) {
-  const addFurniture = (kind: FurnitureKind, label: string, size: [number, number, number]) => {
+  const addFurniture = (
+    kind: FurnitureKind,
+    label: string,
+    size: [number, number, number],
+    extra: Partial<FurnitureObject> = {},
+  ) => {
+    const id = `${kind}_${Date.now().toString(36)}`;
     const obj: FurnitureObject = {
-      id: `${kind}_${Date.now().toString(36)}`,
+      id,
       kind,
       label,
-      position: [2.0, 2.0, size[2] / 2],
+      position: [2.2, 2.2, size[2] / 2],
       size,
       rotation_deg: 0,
+      ...extra,
     };
     cb.onUpdateRoom((r) => ({ ...r, furniture: [...r.furniture, obj] }));
+    cb.onSetState({ selectedFurnitureId: id, editTool: "furniture" });
+  };
+
+  const selected =
+    room.furniture.find((f) => f.id === panelState.selectedFurnitureId) ?? room.furniture[0];
+
+  const updateSelected = (updater: (f: FurnitureObject) => FurnitureObject) => {
+    if (!selected) return;
+    cb.onUpdateRoom((r) => ({
+      ...r,
+      furniture: r.furniture.map((f) => (f.id === selected.id ? updater(f) : f)),
+    }));
   };
 
   return html`
@@ -363,13 +495,39 @@ function renderFurnitureTab(
         <button type="button" class="action-btn" @click=${() => addFurniture("couch", "Couch", [2.4, 0.95, 0.85])}>
           + Couch
         </button>
+        <button
+          type="button"
+          class="action-btn"
+          @click=${() =>
+            addFurniture("couch_l", "L-Couch", [2.7, 0.95, 0.85], {
+              l_side: "left",
+              wing_width_m: 0.95,
+              wing_depth_m: 1.25,
+            })}
+        >
+          + L-Couch
+        </button>
+        <button
+          type="button"
+          class="action-btn"
+          @click=${() =>
+            addFurniture("couch_u", "U-Couch", [3.1, 0.95, 0.85], {
+              wing_width_m: 0.9,
+              wing_depth_m: 1.2,
+            })}
+        >
+          + U-Couch
+        </button>
+        <button type="button" class="action-btn" @click=${() => addFurniture("wardrobe", "Schrank", [1.6, 0.6, 2.1])}>
+          + Schrank
+        </button>
+        <button type="button" class="action-btn" @click=${() => addFurniture("sideboard", "Sideboard", [1.8, 0.45, 0.65])}>
+          + Sideboard
+        </button>
         <button type="button" class="action-btn" @click=${() => addFurniture("tv", "TV / Leinwand", [1.8, 0.1, 1.0])}>
           + TV
         </button>
-        <button type="button" class="action-btn" @click=${() => addFurniture("sideboard", "Sideboard", [1.6, 0.45, 0.7])}>
-          + Sideboard
-        </button>
-        <button type="button" class="action-btn" @click=${() => addFurniture("desk", "Schreibtisch", [1.6, 0.8, 0.74])}>
+        <button type="button" class="action-btn" @click=${() => addFurniture("table", "Tisch", [1.2, 0.75, 0.45])}>
           + Tisch
         </button>
       </div>
@@ -377,8 +535,17 @@ function renderFurnitureTab(
       <div class="edit-list">
         ${room.furniture.map(
           (item) => html`
-            <div class="edit-list-row">
-              <span>${item.label ?? item.kind} (${item.position[0].toFixed(1)}m, ${item.position[1].toFixed(1)}m)</span>
+            <div
+              class="edit-list-row"
+              style=${selected?.id === item.id ? "border-color:#38bdf8" : ""}
+            >
+              <button
+                type="button"
+                class="mini-tab ${selected?.id === item.id ? "active" : ""}"
+                @click=${() => cb.onSetState({ selectedFurnitureId: item.id })}
+              >
+                ${item.label ?? item.kind}
+              </button>
               <div class="subview-tabs">
                 <button
                   type="button"
@@ -388,12 +555,12 @@ function renderFurnitureTab(
                       ...r,
                       furniture: r.furniture.map((f) =>
                         f.id === item.id
-                          ? { ...f, rotation_deg: ((f.rotation_deg ?? 0) + 90) % 360 }
+                          ? { ...f, rotation_deg: ((f.rotation_deg ?? 0) + 45) % 360 }
                           : f,
                       ),
                     }))}
                 >
-                  90°
+                  +45°
                 </button>
                 <button
                   type="button"
@@ -411,6 +578,143 @@ function renderFurnitureTab(
           `,
         )}
       </div>
+
+      ${selected
+        ? html`
+            <div class="edit-grid">
+              <label>
+                Möbel-Form
+                <select
+                  .value=${selected.kind}
+                  @change=${(e: Event) => {
+                    const kind = (e.target as HTMLSelectElement).value as FurnitureKind;
+                    updateSelected((f) => ({ ...f, kind }));
+                  }}
+                >
+                  ${FURNITURE_KIND_OPTIONS.map(
+                    ([val, text]) => html`<option value=${val}>${text}</option>`,
+                  )}
+                </select>
+              </label>
+              <label>
+                Bezeichnung
+                <input
+                  type="text"
+                  .value=${selected.label ?? ""}
+                  @input=${(e: Event) =>
+                    updateSelected((f) => ({ ...f, label: (e.target as HTMLInputElement).value }))}
+                />
+              </label>
+              <label>
+                Breite (m): ${selected.size[0].toFixed(2)}
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.3"
+                  max="6"
+                  .value=${String(selected.size[0])}
+                  @change=${(e: Event) => {
+                    const w = Math.max(0.3, Number((e.target as HTMLInputElement).value));
+                    updateSelected((f) => ({ ...f, size: [w, f.size[1], f.size[2]] }));
+                  }}
+                />
+              </label>
+              <label>
+                Tiefe (m): ${selected.size[1].toFixed(2)}
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.05"
+                  max="4"
+                  .value=${String(selected.size[1])}
+                  @change=${(e: Event) => {
+                    const d = Math.max(0.05, Number((e.target as HTMLInputElement).value));
+                    updateSelected((f) => ({ ...f, size: [f.size[0], d, f.size[2]] }));
+                  }}
+                />
+              </label>
+              <label>
+                Höhe (m): ${selected.size[2].toFixed(2)}
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.1"
+                  max="3"
+                  .value=${String(selected.size[2])}
+                  @change=${(e: Event) => {
+                    const h = Math.max(0.1, Number((e.target as HTMLInputElement).value));
+                    updateSelected((f) => ({
+                      ...f,
+                      size: [f.size[0], f.size[1], h],
+                      position: [f.position[0], f.position[1], h / 2],
+                    }));
+                  }}
+                />
+              </label>
+              <label>
+                Drehung (°): ${selected.rotation_deg ?? 0}°
+                <input
+                  type="number"
+                  step="15"
+                  min="0"
+                  max="345"
+                  .value=${String(selected.rotation_deg ?? 0)}
+                  @change=${(e: Event) =>
+                    updateSelected((f) => ({
+                      ...f,
+                      rotation_deg: Number((e.target as HTMLInputElement).value) % 360,
+                    }))}
+                />
+              </label>
+              <label>
+                Farbe
+                <input
+                  type="color"
+                  .value=${selected.color ?? "#3b4454"}
+                  @input=${(e: Event) =>
+                    updateSelected((f) => ({ ...f, color: (e.target as HTMLInputElement).value }))}
+                />
+              </label>
+              ${selected.kind === "couch_l"
+                ? html`
+                    <label>
+                      Schenkel-Seite
+                      <select
+                        .value=${selected.l_side ?? "left"}
+                        @change=${(e: Event) =>
+                          updateSelected((f) => ({
+                            ...f,
+                            l_side: (e.target as HTMLSelectElement).value as "left" | "right",
+                          }))}
+                      >
+                        <option value="left">Links</option>
+                        <option value="right">Rechts</option>
+                      </select>
+                    </label>
+                  `
+                : nothing}
+              ${selected.kind === "couch_l" || selected.kind === "couch_u"
+                ? html`
+                    <label>
+                      Schenkel-Länge (m)
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.6"
+                        max="3"
+                        .value=${String(selected.wing_depth_m ?? 1.15)}
+                        @change=${(e: Event) =>
+                          updateSelected((f) => ({
+                            ...f,
+                            wing_depth_m: Number((e.target as HTMLInputElement).value),
+                          }))}
+                      />
+                    </label>
+                  `
+                : nothing}
+            </div>
+          `
+        : nothing}
     </div>
   `;
 }
@@ -457,17 +761,30 @@ function renderLightsTab(
     const placement: LightPlacement = {
       entity_id: selectedOption,
       label: opt?.name,
+      visual_style: { kind: panelState.newLightVisualKind, scale: 1, rotation_deg: 0 },
       geometry,
     };
     cb.onUpdateRoom((r) => ({ ...r, lights: [...r.lights, placement] }));
-    cb.onNotify("ok", `${opt?.name ?? selectedOption} hinzugefügt – jetzt in Drauf-/Frontalansicht ziehen!`);
+    cb.onSetState({ selectedEditLightId: selectedOption });
+    cb.onNotify("ok", `${opt?.name ?? selectedOption} hinzugefügt – in Drauf-/Frontalansicht ziehen!`);
+  };
+
+  const editedLight =
+    room.lights.find((l) => l.entity_id === panelState.selectedEditLightId) ?? room.lights[0];
+
+  const updateEditedLight = (updater: (l: LightPlacement) => LightPlacement) => {
+    if (!editedLight) return;
+    cb.onUpdateRoom((r) => ({
+      ...r,
+      lights: r.lights.map((l) => (l.entity_id === editedLight.entity_id ? updater(l) : l)),
+    }));
   };
 
   return html`
     <div class="edit-stack">
       <div class="modes-badge">
         Ziehe Lichter in der <strong>Draufsicht</strong> (X/Y) und in der{" "}
-        <strong>Frontalansicht</strong> (Höhe Z).
+        <strong>Frontalansicht</strong> (Höhe Z) und wähle unten das Lampen-Design.
       </div>
 
       <div class="edit-actions-row">
@@ -512,20 +829,40 @@ function renderLightsTab(
           </select>
         </label>
         <label>
-          Darstellungsform
+          Geometrie
           <select
             .value=${panelState.newLightType}
+            @change=${(e: Event) => {
+              const type = (e.target as HTMLSelectElement).value as
+                | "point"
+                | "vertical_column"
+                | "polyline";
+              const defaultKind: LightVisualKind =
+                type === "polyline"
+                  ? "led_strip"
+                  : type === "vertical_column"
+                    ? "floor_strip"
+                    : "bulb";
+              cb.onSetState({ newLightType: type, newLightVisualKind: defaultKind });
+            }}
+          >
+            <option value="point">Punkt / Einzel-Leuchte</option>
+            <option value="vertical_column">Vertikale Säule</option>
+            <option value="polyline">3D-Pfad / Über Eck</option>
+          </select>
+        </label>
+        <label>
+          Lampen-Design
+          <select
+            .value=${panelState.newLightVisualKind}
             @change=${(e: Event) =>
               cb.onSetState({
-                newLightType: (e.target as HTMLSelectElement).value as
-                  | "point"
-                  | "vertical_column"
-                  | "polyline",
+                newLightVisualKind: (e.target as HTMLSelectElement).value as LightVisualKind,
               })}
           >
-            <option value="point">Punkt / Lampe</option>
-            <option value="vertical_column">Stehlampe (Vertikal-Säule)</option>
-            <option value="polyline">LED-Strip (3D-Pfad / über Eck)</option>
+            ${LIGHT_DESIGN_OPTIONS.map(
+              ([val, text]) => html`<option value=${val}>${text}</option>`,
+            )}
           </select>
         </label>
         <button type="button" class="action-btn primary" @click=${addLight}>+ Licht platzieren</button>
@@ -533,16 +870,17 @@ function renderLightsTab(
 
       <div class="edit-list">
         ${room.lights.map((light) => {
-          const coords =
-            light.geometry.type === "point"
-              ? `(${light.geometry.position.map((v) => v.toFixed(2)).join(", ")})`
-              : light.geometry.type === "vertical_column"
-                ? `Z: ${light.geometry.from[2].toFixed(2)}–${light.geometry.to[2].toFixed(2)}m`
-                : `${light.geometry.points.length} Pkt`;
-
+          const style = resolveEffectiveLightStyle(light);
+          const isEditingThis = editedLight?.entity_id === light.entity_id;
           return html`
-            <div class="edit-list-row">
-              <span>${light.label ?? light.entity_id} · ${coords}</span>
+            <div class="edit-list-row" style=${isEditingThis ? "border-color:#38bdf8" : ""}>
+              <button
+                type="button"
+                class="mini-tab ${isEditingThis ? "active" : ""}"
+                @click=${() => cb.onSetState({ selectedEditLightId: light.entity_id })}
+              >
+                ${light.label ?? light.entity_id} · [${style.kind}]
+              </button>
               <div class="subview-tabs">
                 ${light.geometry.type === "polyline"
                   ? html`
@@ -580,13 +918,98 @@ function renderLightsTab(
                       lights: r.lights.filter((l) => l.entity_id !== light.entity_id),
                     }))}
                 >
-                  Entfernen
+                  ×
                 </button>
               </div>
             </div>
           `;
         })}
       </div>
+
+      ${editedLight
+        ? (() => {
+            const effStyle = resolveEffectiveLightStyle(editedLight);
+            return html`
+              <div class="edit-grid">
+                <label>
+                  Design für "${editedLight.label ?? editedLight.entity_id}"
+                  <select
+                    .value=${effStyle.kind}
+                    @change=${(e: Event) => {
+                      const kind = (e.target as HTMLSelectElement).value as LightVisualKind;
+                      updateEditedLight((l) => ({
+                        ...l,
+                        visual_style: { ...resolveEffectiveLightStyle(l), kind },
+                      }));
+                    }}
+                  >
+                    ${LIGHT_DESIGN_OPTIONS.map(
+                      ([val, text]) => html`<option value=${val}>${text}</option>`,
+                    )}
+                  </select>
+                </label>
+                <label>
+                  Name / Label
+                  <input
+                    type="text"
+                    .value=${editedLight.label ?? ""}
+                    @input=${(e: Event) =>
+                      updateEditedLight((l) => ({
+                        ...l,
+                        label: (e.target as HTMLInputElement).value,
+                      }))}
+                  />
+                </label>
+                <label>
+                  Gruppe-Tag (z. B. Front)
+                  <input
+                    type="text"
+                    .value=${editedLight.group_tag ?? ""}
+                    @input=${(e: Event) =>
+                      updateEditedLight((l) => ({
+                        ...l,
+                        group_tag: (e.target as HTMLInputElement).value || undefined,
+                      }))}
+                  />
+                </label>
+                <label>
+                  Größe: ${(effStyle.scale ?? 1).toFixed(1)}×
+                  <input
+                    type="range"
+                    min="0.6"
+                    max="1.8"
+                    step="0.1"
+                    .value=${String(effStyle.scale ?? 1)}
+                    @input=${(e: Event) => {
+                      const scale = Number((e.target as HTMLInputElement).value);
+                      updateEditedLight((l) => ({
+                        ...l,
+                        visual_style: { ...resolveEffectiveLightStyle(l), scale },
+                      }));
+                    }}
+                  />
+                </label>
+                <label>
+                  Ausrichtung (°): ${effStyle.rotation_deg ?? 0}°
+                  <input
+                    type="range"
+                    min="0"
+                    max="345"
+                    step="15"
+                    .value=${String(effStyle.rotation_deg ?? 0)}
+                    @input=${(e: Event) => {
+                      const rotation_deg = Number((e.target as HTMLInputElement).value);
+                      updateEditedLight((l) => ({
+                        ...l,
+                        visual_style: { ...resolveEffectiveLightStyle(l), rotation_deg },
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+            `;
+          })()
+        : nothing}
     </div>
   `;
 }
@@ -608,20 +1031,6 @@ function renderBackupTab(
     }
   };
 
-  const applyImport = () => {
-    try {
-      const parsed = JSON.parse(panelState.importText);
-      const normalized = normalizeConfig(parsed);
-      cb.onUpdateConfig(normalized, normalized.rooms[0]?.id);
-      cb.onNotify("ok", `Konfiguration mit ${normalized.rooms.length} Raum/Räumen importiert.`);
-    } catch (err) {
-      cb.onNotify(
-        "error",
-        `Ungültiges JSON: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  };
-
   const copySubviewYaml = async () => {
     const yaml = [
       "title: Licht-Studio",
@@ -639,6 +1048,20 @@ function renderBackupTab(
     } catch {
       cb.onSetState({ importText: yaml });
       cb.onNotify("warn", "Zwischenablage blockiert – Subview-YAML im Textfeld angezeigt.");
+    }
+  };
+
+  const applyImport = () => {
+    try {
+      const parsed = JSON.parse(panelState.importText);
+      const normalized = normalizeConfig(parsed);
+      cb.onUpdateConfig(normalized, normalized.rooms[0]?.id);
+      cb.onNotify("ok", `Konfiguration mit ${normalized.rooms.length} Raum/Räumen importiert.`);
+    } catch (err) {
+      cb.onNotify(
+        "error",
+        `Ungültiges JSON: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 

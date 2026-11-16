@@ -54,7 +54,7 @@
       <strong>HOAS LightWidget · Phase 2 Live-Glow Test-Harness</strong>
       <div class="btn-group">
         <button id="btn-mobile" type="button">Smartphone (390px)</button>
-        <button id="btn-desktop" type="button">Desktop (1120px)</button>
+        <button id="btn-desktop" type="button">Desktop (100%)</button>
         <button id="btn-sim-cinema" type="button">Simuliere: Filmabend</button>
         <button id="btn-sim-warm" type="button">Simuliere: 2400K Warm</button>
         <button id="btn-sim-off" type="button">Simuliere: Alles Aus</button>
@@ -103,9 +103,13 @@
 
       document.getElementById("btn-mobile").addEventListener("click", () => {
         frame.classList.add("mobile");
+        frame.style.maxWidth = "390px";
+        widget.fullwidth = false;
       });
       document.getElementById("btn-desktop").addEventListener("click", () => {
         frame.classList.remove("mobile");
+        frame.style.maxWidth = "100%";
+        widget.fullwidth = true;
       });
       document.getElementById("btn-sim-cinema").addEventListener("click", () => {
         pushPatch({

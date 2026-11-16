@@ -1,0 +1,11 @@
+{
+  "domain": "hoas_light_widget",
+  "name": "HOAS LightWidget",
+  "codeowners": ["@kahel-soft"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/kahel-soft/HOAS-LightWidget",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/kahel-soft/HOAS-LightWidget/issues",
+  "version": "0.2.0"
+}

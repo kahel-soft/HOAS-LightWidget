@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HOAS LightWidget einrichten",
+        "description": "Registriert das eigenständige 3D/2D Licht-Studio in der Home Assistant Menüleiste.",
+        "data": {
+          "sidebar_title": "Name in der Menüleiste",
+          "sidebar_icon": "Icon (z. B. mdi:lightbulb-group)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "HOAS LightWidget ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Menüleisten-Darstellung anpassen",
+        "data": {
+          "sidebar_title": "Name in der Menüleiste",
+          "sidebar_icon": "Icon (z. B. mdi:lightbulb-group)"
+        }
+      }
+    }
+  }
+}

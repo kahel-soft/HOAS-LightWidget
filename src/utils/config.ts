@@ -74,6 +74,8 @@ function normalizeRoom(raw: Partial<RoomConfig>, index: number): RoomConfig {
         : DEFAULT_ROOM_HEIGHT_M,
     floor_polygon: floorPolygon,
     inner_walls: Array.isArray(raw.inner_walls) ? raw.inner_walls : [],
+    wall_features: Array.isArray(raw.wall_features) ? raw.wall_features : [],
+    theme: raw.theme,
     camera_pov: raw.camera_pov ?? {
       position: [centerX, bounds.maxY - 0.8, 1.25],
       target: [centerX, bounds.minY + 0.4, 1.0],

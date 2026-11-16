@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 export default defineConfig(({ command }) => {
@@ -39,5 +40,21 @@ export default defineConfig(({ command }) => {
         },
       },
     },
+    plugins: [
+      {
+        name: "copy-to-custom-component",
+        closeBundle() {
+          const targetDir = resolve(
+            __dirname,
+            "custom_components/hoas_light_widget/frontend",
+          );
+          mkdirSync(targetDir, { recursive: true });
+          copyFileSync(
+            resolve(__dirname, "dist/hoas-light-widget.js"),
+            resolve(targetDir, "hoas-light-widget.js"),
+          );
+        },
+      },
+    ],
   };
 });

@@ -9,9 +9,12 @@ import {
   createCombinedRoomsPolygon,
   createLShapePolygon,
   createRectPolygon,
+  getFurnitureLocalRects,
+  insertPolygonVertexOnNearestEdge,
   removePolygonVertex,
   snapOrthogonalPoint,
 } from "../src/utils/floor-editor";
+import { resolveEffectiveLightStyle } from "../src/renderers/lights-3d";
 import { clientToViewBoxCoords } from "../src/renderers/plan-2d";
 
 const MOCK_HASS: HomeAssistant = {
@@ -88,5 +91,58 @@ describe("Edit-Mode Entity Picker & Floor Sketcher", () => {
     );
     expect(pt.x).toBeCloseTo(2.5, 4);
     expect(pt.y).toBeCloseTo(2.5, 4);
+  });
+
+  it("generates L-couch (2 rects), U-couch (3 rects), and inserts wall vertices on nearest edge", () => {
+    const lRects = getFurnitureLocalRects({
+      id: "c1",
+      kind: "couch_l",
+      position: [2, 3, 0.4],
+      size: [2.6, 0.9, 0.85],
+      l_side: "right",
+    });
+    const uRects = getFurnitureLocalRects({
+      id: "c2",
+      kind: "couch_u",
+      position: [2, 3, 0.4],
+      size: [3.0, 0.9, 0.85],
+    });
+    expect(lRects).toHaveLength(2);
+    expect(uRects).toHaveLength(3);
+
+    const rect = createRectPolygon(4, 4);
+    const withExtra = insertPolygonVertexOnNearestEdge(rect, { x: 2.0, y: 0.1 }, 0.25);
+    expect(withExtra).toHaveLength(5);
+    expect(withExtra[1]).toEqual({ x: 2, y: 0 });
+  });
+
+  it("infers sensible light designs from geometry when visual_style is omitted", () => {
+    expect(
+      resolveEffectiveLightStyle({
+        entity_id: "light.strip",
+        geometry: {
+          type: "polyline",
+          points: [
+            [0, 0, 1],
+            [1, 0, 1],
+          ],
+        },
+      }).kind,
+    ).toBe("led_strip");
+
+    expect(
+      resolveEffectiveLightStyle({
+        entity_id: "light.floor",
+        geometry: { type: "vertical_column", from: [1, 1, 0.2], to: [1, 1, 1.5] },
+      }).kind,
+    ).toBe("floor_strip");
+
+    expect(
+      resolveEffectiveLightStyle({
+        entity_id: "light.spot",
+        visual_style: { kind: "spot", scale: 1.3, rotation_deg: 45 },
+        geometry: { type: "point", position: [1, 1, 2] },
+      }),
+    ).toEqual({ kind: "spot", scale: 1.3, rotation_deg: 45 });
   });
 });

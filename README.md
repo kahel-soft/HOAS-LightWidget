@@ -1,8 +1,26 @@
 # HOAS LightWidget
 
-Smartphone-optimierte Home-Assistant Custom Lovelace Card (`custom:hoas-light-widget`) zur räumlichen 3D/2D-Visualisierung, Positionierung und einheitlichen Ambiente-Lichtsteuerung pro Raum/Bereich.
+Eigenständiges Home-Assistant **Licht-Studio** (Menüleisten-Tool in voller Breite **und** Lovelace Custom Card `custom:hoas-light-widget`) zur räumlichen 3D/2D-Visualisierung, Möbel-/Raumskizzierung, Lampen-Design-Gestaltung und einheitlichen Ambiente-Lichtsteuerung.
 
-Siehe [docs/CONCEPT.md](docs/CONCEPT.md) für die vollständige Spezifikation.
+Siehe [docs/CONCEPT.md](docs/CONCEPT.md) für die Architektur- und Bedienspezifikation.
+
+## Features
+
+* **Eigenständiges Menüleisten-Tool (`Licht-Studio`):** Nutzt die volle verfügbare Breite im Home-Assistant-Interface und speichert Raum-Layouts zentral auf dem HA-Server (`Store` + WebSocket-API).
+* **Freies Raum- & Möbeldesign:** Grundrisse als Rechteck, L-Form, kombinierte Räume oder frei skizzierbar; Fenster/Türen; Möbel inkl. gerader Couch, **L-Form-Couch**, **U-Form-Couch**, **Schrank/Regal**, Sideboard, TV, Tisch/Schreibtisch.
+* **Unterscheidbares Lampen-Design:** Wähle in 3D & 2D zwischen **LED-Strip** (Band/über Eck), **Stehlampe mit Schirm**, **Stehlampen-LED-Säule**, **Spot/Strahler** (mit Kegel & Ausrichtung), **Glühlampe**, **Tisch-/Bodenlampe** und **Deckenleuchte**.
+* **Hardware-kompatibler Color-Mode Translator:** Übersetzt Farben & Kelvin automatisch passend für `hue` (`xy`/`color_temp_kelvin`), `tuya_lamp_local` (`hs`/`white`), `mqtt` (`hs`/`color_temp_kelvin`), `rgb` und `brightness`-Dimmer.
+* **Abgleich-Assistent & HA-Szenen:** Geführter Farb-Abgleich zwischen Lampen-Herstellern + Speichern aller Raum-Lampen (inkl. `"off"`) als native `scene.*`.
+
+## Installation über den Home Assistant Marketplace (HACS)
+
+Seit v0.2.0 wird HOAS LightWidget als **Integration** (inkl. eigenständigem Menüleisten-Tool + Dashboard-Card) ausgeliefert:
+
+1. In Home Assistant unter **Einstellungen → Marketplace** (bzw. HACS) → **⋮ → Benutzerdefinierte Repositories** öffnen.
+2. Repository **`kahel-soft/HOAS-LightWidget`** mit Kategorie **`Integration`** hinzufügen *(falls früher als Plugin hinzugefügt, das alte Custom Repository zuerst entfernen)*.
+3. **HOAS LightWidget** herunterladen und **Home Assistant neu starten**.
+4. Danach unter **Einstellungen → Geräte & Dienste → + Integration hinzufügen** nach **HOAS LightWidget** suchen und bestätigen.
+5. **Licht-Studio** erscheint sofort in der linken Menüleiste!
 
 ## Entwicklung
 
@@ -11,21 +29,5 @@ npm install
 npm run dev        # Lokaler Test-Harness unter http://localhost:5173
 npm run typecheck  # TypeScript-Prüfung
 npm test           # Unit-Tests (Vitest)
-npm run build      # Selbstenthaltenes ES-Bundle nach dist/hoas-light-widget.js
+npm run build      # Baut dist/hoas-light-widget.js & custom_components/.../frontend/hoas-light-widget.js
 ```
-
-## Integration über den Home Assistant Marketplace (HACS)
-
-Dieses Repository ist als Frontend-Plugin (`category: plugin` / `lovelace`) über [hacs.json](hacs.json) und den automatisierten Release-Workflow [.github/workflows/release.yml](.github/workflows/release.yml) für den **Home Assistant Marketplace** vorbereitet:
-
-1. Code auf GitHub pushen und ein Release-Tag setzen (z. B. `git tag v0.1.0 && git push --tags`). Der Workflow hängt `hoas-light-widget.js` automatisch an das GitHub-Release an.
-2. In Home Assistant unter **Einstellungen → Marketplace** (bzw. HACS) das Repository über **Benutzerdefinierte Repositories** mit Kategorie **Plugin / Dashboard** hinzufügen.
-3. **HOAS LightWidget** installieren – der Marketplace legt das Modul unter `/config/www/community/...` ab und registriert die Lovelace-Ressource automatisch.
-4. Anschließend im Dashboard eine Karte vom Typ `custom:hoas-light-widget` hinzufügen.
-
-## Direkter Test auf dem Home Assistant Server (ohne Release)
-
-1. `npm run build` ausführen.
-2. `dist/hoas-light-widget.js` auf dem Home-Assistant-Server nach `/config/www/hoas-light-widget.js` kopieren.
-3. Unter **Einstellungen → Dashboards → ⋮ → Ressourcen** als **JavaScript-Modul (`module`)** mit URL `/local/hoas-light-widget.js?v=0.1.0` eintragen.
-4. Bei späteren Builds den `?v=`-Parameter erhöhen (und Browser-/Companion-App-Cache leeren), da `/local/` 31 Tage gecacht wird.

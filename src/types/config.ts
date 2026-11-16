@@ -74,15 +74,26 @@ export interface WallSegment {
   height_m?: number;
 }
 
+export interface WallFeature {
+  id: string;
+  kind: "door" | "window";
+  from: [number, number];
+  to: [number, number];
+}
+
 export type FurnitureKind =
   | "couch"
+  | "couch_l"
+  | "couch_u"
+  | "wardrobe"
   | "tv"
   | "screen"
   | "sideboard"
   | "table"
   | "desk"
   | "bed"
-  | "custom_box";
+  | "custom_box"
+  | "custom_poly";
 
 export interface FurnitureObject {
   id: string;
@@ -90,6 +101,31 @@ export interface FurnitureObject {
   label?: string;
   position: Point3D;
   size: [number, number, number];
+  rotation_deg?: number;
+  /** Für L-Form Couch: auf welcher Seite liegt der Schenkel */
+  l_side?: "left" | "right";
+  /** Schenkel-Tiefe (nach vorn) bei L- oder U-Form in Metern */
+  wing_depth_m?: number;
+  /** Schenkel-Breite bei L- oder U-Form in Metern */
+  wing_width_m?: number;
+  /** Optionale Materialfarbe (Hex) */
+  color?: string;
+  /** Optionale lokale Polygonpunkte für custom_poly */
+  polygon?: Point2D[];
+}
+
+export type LightVisualKind =
+  | "bulb"
+  | "floor_lamp"
+  | "floor_strip"
+  | "spot"
+  | "led_strip"
+  | "table_lamp"
+  | "ceiling";
+
+export interface LightVisualStyle {
+  kind: LightVisualKind;
+  scale?: number;
   rotation_deg?: number;
 }
 
@@ -104,7 +140,13 @@ export interface LightPlacement {
   label?: string;
   group_tag?: string;
   composite_id?: string;
+  visual_style?: LightVisualStyle;
   geometry: LightGeometry;
+}
+
+export interface RoomTheme {
+  floor_color?: string;
+  wall_color?: string;
 }
 
 export interface RoomConfig {
@@ -115,6 +157,8 @@ export interface RoomConfig {
   /** Orthogonales Grundriss-Polygon in Metern (Rechteck, L-Form, 2 kombinierte Räume) */
   floor_polygon: Point2D[];
   inner_walls?: WallSegment[];
+  wall_features?: WallFeature[];
+  theme?: RoomTheme;
   camera_pov: {
     position: Point3D;
     target: Point3D;

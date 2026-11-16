@@ -25,6 +25,25 @@ export const cardStyles = css`
     border: 1px solid var(--hlw-border);
   }
 
+  :host([fullwidth]) {
+    width: 100%;
+    height: 100%;
+  }
+
+  :host([fullwidth]) ha-card {
+    border: none;
+    border-radius: 0;
+  }
+
+  @media (min-width: 820px) {
+    :host([fullwidth]) .stage-3d {
+      height: clamp(360px, 48vh, 560px);
+    }
+    :host([fullwidth]) .stage-2d svg {
+      max-height: clamp(280px, 44vh, 520px);
+    }
+  }
+
   .header {
     display: flex;
     align-items: center;

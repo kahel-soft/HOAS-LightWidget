@@ -185,10 +185,20 @@ export const DEMO_CONFIG: HoasLightWidgetConfig = {
         },
         {
           id: "couch",
-          kind: "couch",
-          label: "Couch",
-          position: [2.6, 3.7, 0.45],
-          size: [2.5, 0.95, 0.85],
+          kind: "couch_l",
+          label: "L-Couch",
+          position: [2.6, 3.7, 0.42],
+          size: [2.7, 0.95, 0.85],
+          l_side: "left",
+          wing_width_m: 0.95,
+          wing_depth_m: 1.25,
+        },
+        {
+          id: "schrank",
+          kind: "wardrobe",
+          label: "Schrank",
+          position: [0.35, 1.6, 1.0],
+          size: [0.55, 1.4, 2.0],
         },
       ],
       lights: [
@@ -197,6 +207,7 @@ export const DEMO_CONFIG: HoasLightWidgetConfig = {
           label: "Stehlampe L Haupt",
           composite_id: "stehlampe_l",
           group_tag: "Front",
+          visual_style: { kind: "floor_strip", scale: 1.0 },
           geometry: { type: "vertical_column", from: [1.1, 0.35, 0.35], to: [1.1, 0.35, 1.55] },
         },
         {
@@ -204,6 +215,7 @@ export const DEMO_CONFIG: HoasLightWidgetConfig = {
           label: "Stehlampe L Sockel",
           composite_id: "stehlampe_l",
           group_tag: "Front",
+          visual_style: { kind: "table_lamp", scale: 0.9 },
           geometry: { type: "point", position: [1.1, 0.35, 0.18] },
         },
         {
@@ -211,6 +223,7 @@ export const DEMO_CONFIG: HoasLightWidgetConfig = {
           label: "Stehlampe R Haupt",
           composite_id: "stehlampe_r",
           group_tag: "Front",
+          visual_style: { kind: "floor_lamp", scale: 1.0 },
           geometry: { type: "vertical_column", from: [4.1, 0.35, 0.35], to: [4.1, 0.35, 1.55] },
         },
         {
@@ -218,24 +231,28 @@ export const DEMO_CONFIG: HoasLightWidgetConfig = {
           label: "Stehlampe R Sockel",
           composite_id: "stehlampe_r",
           group_tag: "Front",
+          visual_style: { kind: "table_lamp", scale: 0.9 },
           geometry: { type: "point", position: [4.1, 0.35, 0.18] },
         },
         {
           entity_id: "light.wohnzimmer_bodenlampe_rechts",
           label: "Bodenlampe R",
           group_tag: "Front",
+          visual_style: { kind: "bulb", scale: 1.1 },
           geometry: { type: "point", position: [4.65, 0.55, 0.2] },
         },
         {
           entity_id: "light.wohnzimmer_wandlicht",
           label: "Wandlicht Links",
           group_tag: "Front",
+          visual_style: { kind: "spot", scale: 1.1, rotation_deg: 180 },
           geometry: { type: "point", position: [0.45, 0.4, 1.8] },
         },
         {
           entity_id: "light.wohnzimmer_led_couch",
           label: "LED Couch (Eck)",
           group_tag: "Hinten",
+          visual_style: { kind: "led_strip", scale: 1.0 },
           geometry: {
             type: "polyline",
             points: [

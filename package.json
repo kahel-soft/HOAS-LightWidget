@@ -1,6 +1,6 @@
 {
   "name": "hoas-light-widget",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "3D/2D spatial ambient lighting control card for Home Assistant",
   "type": "module",
